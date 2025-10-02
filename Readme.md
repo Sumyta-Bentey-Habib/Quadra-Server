@@ -1,1 +1,0 @@
-# Quadra Server
