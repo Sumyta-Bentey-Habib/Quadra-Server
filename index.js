@@ -119,7 +119,7 @@ async function run() {
 		});
 
 		// Get conversations for a user
-		app.get("/conversations/:userId", async (req, res) => {
+		app.get("/conversations/user/:userId", async (req, res) => {
 			try {
 				const { userId } = req.params;
 
@@ -198,20 +198,17 @@ async function run() {
 								lastMessage: 1,
 								createdAt: 1,
 								updatedAt: 1,
-								participantDetails: {
-									_id: 1,
-									name: 1,
-									email: 1,
-									image: 1,
-								},
+								participantDetails: 1,
 							},
 						},
 					])
-					.next();
+					.toArray();
 
-				if (!conversation) return res.status(404).send({ message: "Conversation not found" });
+				if (conversation.length === 0) {
+					return res.status(404).send({ message: "Conversation not found" });
+				}
 
-				res.status(200).send(conversation);
+				res.status(200).send(conversation[0]);
 			} catch (error) {
 				console.error("Failed to fetch conversation:", error);
 				res.status(500).send({ message: "Internal server error" });
@@ -347,7 +344,7 @@ async function run() {
 	} catch (error) {
 		console.error(" MongoDB connection failed:", error);
 	} finally {
-		//await client.close();
+		// await client.close();
 	}
 }
 
