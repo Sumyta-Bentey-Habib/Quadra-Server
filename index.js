@@ -39,11 +39,13 @@ async function run() {
 		const db = client.db("QuadraDB");
 		userCollection = db.collection("users");
 		conversationCollection = db.collection("conversations");
-		messageCollection = db.collection("messages");
+    messageCollection = db.collection("messages");
+    postCollection = db.collection("posts");
 
 		// Indexes for faster queries
 		await messageCollection.createIndex({ conversationId: 1, createdAt: 1 });
-		await conversationCollection.createIndex({ participants: 1 });
+    await conversationCollection.createIndex({ participants: 1 });
+    await postCollection.createIndex({ createdAt: -1 });
 
 		console.log("Connected to MongoDB & QuadraDB.users");
 
@@ -69,7 +71,110 @@ async function run() {
 				console.error("Failed to get users:", error);
 				res.status(500).send({ message: "Internal server error" });
 			}
-		});
+    });
+    
+
+    
+
+    // Create a new post
+    app.post("/posts", async (req, res) => {
+      try {
+        const { userId, userName, avatar, text, images } = req.body;
+        if (!userId || (!text && (!images || images.length === 0))) {
+          return res.status(400).send({ message: "Post content is required" });
+        }
+
+        const newPost = {
+          userId: new ObjectId(userId),
+          userName,
+          avatar,
+          text,
+          images: images || [],
+          likes: [], 
+          comments: [],
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const result = await postCollection.insertOne(newPost);
+        res.status(201).send({ ...newPost, _id: result.insertedId });
+      } catch (error) {
+        console.error("Failed to create post:", error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
+
+
+    // * Get a single post by ID
+    // ! Get all posts by a specific user
+    // * Get all posts
+    app.get("/posts", async (req, res) => {
+      try {
+        // ! can pass ?postId= or ?userId=
+        const { postId, userId } = req.query; 
+
+        // 1. Get a single post by ID
+        if (postId) {
+          if (!ObjectId.isValid(postId))
+            return res.status(400).send({ message: "Invalid Post ID" });
+
+          const post = await postCollection.findOne({ _id: new ObjectId(postId) });
+          if (!post) return res.status(404).send({ message: "Post not found" });
+          return res.status(200).send(post);
+        }
+
+        // 2. Get all posts by a specific user
+        if (userId) {
+        if (!ObjectId.isValid(userId))
+          return res.status(400).send({ message: "Invalid User ID" });
+
+        const userPosts = await postCollection
+          .find({ userId: new ObjectId(userId) }) // convert to ObjectId
+          .sort({ createdAt: -1 })
+          .toArray();
+        return res.status(200).send(userPosts);
+      }
+
+
+        // 3. Get all posts
+        const posts = await postCollection
+          .find({})
+          .sort({ createdAt: -1 })
+          .toArray();
+        return res.status(200).send(posts);
+      } catch (error) {
+        console.error("Failed to fetch posts:", error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
+
+
+    // Delete Post
+    app.delete("/posts/:postId", async (req, res) => {
+      try {
+        const { postId } = req.params;
+
+        if (!ObjectId.isValid(postId)) {
+          return res.status(400).send({ message: "Invalid Post ID" });
+        }
+
+        const result = await postCollection.deleteOne({ _id: new ObjectId(postId) });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ message: "Post not found or already deleted" });
+        }
+
+        res.status(200).send({ message: "Post deleted successfully" });
+      } catch (error) {
+        console.error("Failed to delete post:", error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
+ 
+
 
 		/*
 		=========================================================================
