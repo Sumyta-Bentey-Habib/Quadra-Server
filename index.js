@@ -33,7 +33,7 @@ let userCollection, conversationCollection, messageCollection;
 
 async function run() {
 	try {
-		// await client.connect();
+		await client.connect();
 
 		//  Select your database & collection
 		const db = client.db("QuadraDB");
