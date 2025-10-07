@@ -71,8 +71,55 @@ async function run() {
 				console.error("Failed to get users:", error);
 				res.status(500).send({ message: "Internal server error" });
 			}
-    });
+		});
+		
+		app.get("/users/:id", async (req, res) => {
+			try {
+				const id = req.params.id;
+
+				if (!ObjectId.isValid(id)) {
+				return res.status(400).send({ message: "Invalid user ID" });
+				}
+
+				const user = await userCollection.findOne({ _id: new ObjectId(id) });
+
+				if (!user) {
+				return res.status(404).send({ message: "User not found" });
+				}
+
+				res.status(200).send(user);
+			} catch (error) {
+				console.error("Failed to get user by ID:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+			});
     
+		
+		// PUT /users/:id
+		app.put("/users/:id", async (req, res) => {
+		try {
+			const { id } = req.params;
+			const { name, photoUrl, password } = req.body;
+
+			const updateData = { name, photoUrl };
+			if (password) updateData.password = password; 
+
+			const result = await userCollection.updateOne(
+			{ _id: new ObjectId(id) },
+			{ $set: updateData }
+			);
+
+			if (result.modifiedCount === 0) {
+			return res.status(404).send({ message: "User not found" });
+			}
+
+			const updatedUser = await userCollection.findOne({ _id: new ObjectId(id) });
+			res.status(200).send(updatedUser);
+		} catch (error) {
+			console.error(error);
+			res.status(500).send({ message: "Internal server error" });
+		}
+		});
 
     
 
