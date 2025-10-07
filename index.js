@@ -99,24 +99,30 @@ async function run() {
 		app.put("/users/:id", async (req, res) => {
 		try {
 			const { id } = req.params;
-			const { name, photoUrl, password } = req.body;
+			const { name, photoUrl, bio, twitter, linkedin, portfolio } = req.body;
 
-			const updateData = { name, photoUrl };
-			if (password) updateData.password = password; 
+			const updateData = {};
+
+			if (name) updateData.name = name;
+			if (photoUrl) updateData.photoUrl = photoUrl;
+			if (bio) updateData.bio = bio;
+			if (twitter) updateData.twitter = twitter;
+			if (linkedin) updateData.linkedin = linkedin;
+			if (portfolio) updateData.portfolio = portfolio;
 
 			const result = await userCollection.updateOne(
 			{ _id: new ObjectId(id) },
 			{ $set: updateData }
 			);
 
-			if (result.modifiedCount === 0) {
+			if (result.matchedCount === 0) {
 			return res.status(404).send({ message: "User not found" });
 			}
 
 			const updatedUser = await userCollection.findOne({ _id: new ObjectId(id) });
 			res.status(200).send(updatedUser);
 		} catch (error) {
-			console.error(error);
+			console.error("Failed to update user:", error);
 			res.status(500).send({ message: "Internal server error" });
 		}
 		});
