@@ -139,8 +139,8 @@ async function run() {
 
         const newPost = {
           userId: new ObjectId(userId),
-          userName,
-          avatar,
+          userName: userName || "Anonymous",
+          avatar : avatar || "https://i.pravatar.cc/100",
           text,
           images: images || [],
           likes: [], 
@@ -177,7 +177,7 @@ async function run() {
           return res.status(200).send(post);
         }
 
-        // 2. Get all posts by a specific user
+        // 2. Get all posts by a specific user 
         if (userId) {
         if (!ObjectId.isValid(userId))
           return res.status(400).send({ message: "Invalid User ID" });
