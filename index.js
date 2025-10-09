@@ -200,9 +200,44 @@ async function run() {
         console.error("Failed to fetch posts:", error);
         res.status(500).send({ message: "Internal server error" });
       }
-    });
+	});
+		
+		
+		
+		// PATCH /posts/:postId
+		app.patch("/posts/:postId", async (req, res) => {
+		try {
+			const { postId } = req.params;
+			const { text, images } = req.body;
+
+			if (!ObjectId.isValid(postId)) {
+			return res.status(400).send({ message: "Invalid Post ID" });
+			}
+
+			const updateData = {};
+			if (text) updateData.text = text;
+			if (images) updateData.images = images;
+			updateData.updatedAt = new Date();
+
+			const result = await postCollection.updateOne(
+			{ _id: new ObjectId(postId) },
+			{ $set: updateData }
+			);
+
+			if (result.matchedCount === 0) {
+			return res.status(404).send({ message: "Post not found" });
+			}
+
+			const updatedPost = await postCollection.findOne({ _id: new ObjectId(postId) });
+			res.status(200).send(updatedPost);
+		} catch (error) {
+			console.error("Failed to update post:", error);
+			res.status(500).send({ message: "Internal server error" });
+		}
+		});
 
 
+		
 
     // Delete Post
     app.delete("/posts/:postId", async (req, res) => {
