@@ -262,26 +262,40 @@ async function run() {
     });
 
 	// ***************** Create a new post *****************
-	app.post("/posts/:id/comments",async(req,res)=>{
-		try{
-			const {id}=req.params;
-			const {userId,userName,avatar,text}=req.body
-			if (!text) return res.status(400).send({ message: "Comment text is required" });
-			const comment = {userId,userName,avatar,text,createdAt: new Date()};
-			const result = await db.collection("posts").updateOne(
-				{_id: new ObjectId(id)},
-				{$push: {comments: comment}} ,{ $set: { updatedAt: new Date()}}
-			)
-			if (result.modifiedCount === 0) {
+	app.post("/posts/:id/comments", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userId, userName, avatar, text } = req.body;
+
+    if (!ObjectId.isValid(id))
+      return res.status(400).send({ message: "Invalid post ID" });
+
+    if (!text) return res.status(400).send({ message: "Comment text is required" });
+
+    const comment = {
+      _id: new ObjectId(), // unique ID for comment
+      userId,
+      userName,
+      avatar,
+      text,
+      createdAt: new Date(),
+      replies: [],
+    };
+
+    const result = await db.collection("posts").updateOne(
+      { _id: new ObjectId(id) },
+      { $push: { comments: comment }, $set: { updatedAt: new Date() } }
+    );
+
+    if (result.modifiedCount === 0)
       return res.status(404).send({ message: "Post not found" });
-    }
 
     res.status(201).send({ message: "Comment added successfully", comment });
-		} catch(error){
-			console.error("Failed to add comment:", error);
-			res.status(500).send({ message: "Internal server error" });
-		}
-	})
+  } catch (error) {
+    console.error("Failed to add comment:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
+});
 // comment get route 
 app.get("/posts/:id/comments", async (req, res) => {
   try {
@@ -296,6 +310,57 @@ app.get("/posts/:id/comments", async (req, res) => {
     }
 
     // Return all comments of that post
+    res.status(200).send(post.comments || []);
+  } catch (error) {
+    console.error("Failed to fetch comments:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
+});
+
+//****************************************** */
+
+
+//********************   create comment replies route   ***************** */
+
+app.post("/posts/:postId/comments/:commentId/replies", async (req, res) => {
+  try {
+    const { postId, commentId } = req.params;
+    const { userId, userName, avatar, text } = req.body;
+
+    if (!text) return res.status(400).send({ message: "Reply text is required" });
+
+    if (!ObjectId.isValid(postId) || !ObjectId.isValid(commentId)) {
+      return res.status(400).send({ message: "Invalid postId or commentId" });
+    }
+
+    const reply = {
+      userId,
+      userName,
+      avatar,
+      text,
+      createdAt: new Date(),
+    };
+
+    const result = await db.collection("posts").updateOne(
+      { _id: new ObjectId(postId), "comments._id": new ObjectId(commentId) },
+      { $push: { "comments.$.replies": reply }, $set: { updatedAt: new Date() } }
+    );
+
+    if (result.modifiedCount === 0) {
+      return res.status(404).send({ message: "Post or comment not found" });
+    }
+
+    res.status(201).send({ message: "Reply added successfully", reply });
+  } catch (error) {
+    console.error("Failed to add reply:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
+});
+app.get("/posts/:id/comments", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const post = await db.collection("posts").findOne({ _id: new ObjectId(id) });
+    if (!post) return res.status(404).send({ message: "Post not found" });
     res.status(200).send(post.comments || []);
   } catch (error) {
     console.error("Failed to fetch comments:", error);
