@@ -72,15 +72,162 @@ async function run() {
 				res.status(500).send({ message: "Internal server error" });
 			}
 		});
-		//  Get single user by ID
-           app.get("/users/:id", async (req, res) => {
-               try {
-                   const user = await userCollection.findOne({ _id: new ObjectId(req.params.id) });
-                   if (!user) return res.status(404).json({ message: "User not found" });
-                   res.json(user);
-                    } catch (err) {
-                    res.status(500).json({ message: "Internal server error" });
-         }});
+		
+		app.get("/users/:id", async (req, res) => {
+			try {
+				const id = req.params.id;
+
+				if (!ObjectId.isValid(id)) {
+				return res.status(400).send({ message: "Invalid user ID" });
+				}
+
+				const user = await userCollection.findOne({ _id: new ObjectId(id) });
+
+				if (!user) {
+				return res.status(404).send({ message: "User not found" });
+				}
+
+				res.status(200).send(user);
+			} catch (error) {
+				console.error("Failed to get user by ID:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+			});
+    
+		
+		// PUT /users/:id
+		app.put("/users/:id", async (req, res) => {
+		try {
+			const { id } = req.params;
+			const { name, photoUrl, bio, twitter, linkedin, portfolio } = req.body;
+
+			const updateData = {};
+
+			if (name) updateData.name = name;
+			if (photoUrl) updateData.photoUrl = photoUrl;
+			if (bio) updateData.bio = bio;
+			if (twitter) updateData.twitter = twitter;
+			if (linkedin) updateData.linkedin = linkedin;
+			if (portfolio) updateData.portfolio = portfolio;
+
+			const result = await userCollection.updateOne(
+			{ _id: new ObjectId(id) },
+			{ $set: updateData }
+			);
+
+			if (result.matchedCount === 0) {
+			return res.status(404).send({ message: "User not found" });
+			}
+
+			const updatedUser = await userCollection.findOne({ _id: new ObjectId(id) });
+			res.status(200).send(updatedUser);
+		} catch (error) {
+			console.error("Failed to update user:", error);
+			res.status(500).send({ message: "Internal server error" });
+		}
+		});
+
+    
+
+    // Create a new post
+    app.post("/posts", async (req, res) => {
+      try {
+        const { userId, userName, avatar, text, images } = req.body;
+        if (!userId || (!text && (!images || images.length === 0))) {
+          return res.status(400).send({ message: "Post content is required" });
+        }
+
+        const newPost = {
+          userId: new ObjectId(userId),
+          userName: userName || "Anonymous",
+          avatar : avatar || "https://i.pravatar.cc/100",
+          text,
+          images: images || [],
+          likes: [], 
+          comments: [],
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const result = await postCollection.insertOne(newPost);
+        res.status(201).send({ ...newPost, _id: result.insertedId });
+      } catch (error) {
+        console.error("Failed to create post:", error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
+
+
+    // * Get a single post by ID
+    // ! Get all posts by a specific user
+    // * Get all posts
+    app.get("/posts", async (req, res) => {
+      try {
+        // ! can pass ?postId= or ?userId=
+        const { postId, userId } = req.query; 
+
+        // 1. Get a single post by ID
+        if (postId) {
+          if (!ObjectId.isValid(postId))
+            return res.status(400).send({ message: "Invalid Post ID" });
+
+          const post = await postCollection.findOne({ _id: new ObjectId(postId) });
+          if (!post) return res.status(404).send({ message: "Post not found" });
+          return res.status(200).send(post);
+        }
+
+        // 2. Get all posts by a specific user 
+        if (userId) {
+        if (!ObjectId.isValid(userId))
+          return res.status(400).send({ message: "Invalid User ID" });
+
+        const userPosts = await postCollection
+          .find({ userId: new ObjectId(userId) }) // convert to ObjectId
+          .sort({ createdAt: -1 })
+          .toArray();
+        return res.status(200).send(userPosts);
+      }
+
+
+        // 3. Get all posts
+        const posts = await postCollection
+          .find({})
+          .sort({ createdAt: -1 })
+          .toArray();
+        return res.status(200).send(posts);
+      } catch (error) {
+        console.error("Failed to fetch posts:", error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
+
+
+    // Delete Post
+    app.delete("/posts/:postId", async (req, res) => {
+      try {
+        const { postId } = req.params;
+
+        if (!ObjectId.isValid(postId)) {
+          return res.status(400).send({ message: "Invalid Post ID" });
+        }
+
+        const result = await postCollection.deleteOne({ _id: new ObjectId(postId) });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ message: "Post not found or already deleted" });
+        }
+
+        res.status(200).send({ message: "Post deleted successfully" });
+      } catch (error) {
+        console.error("Failed to delete post:", error);
+        res.status(500).send({ message: "Internal server error" });
+      }
+    });
+
+ 
+
 
 		/*
 		=========================================================================
@@ -385,3 +532,5 @@ run().catch(console.dir);
 server.listen(port, () => {
 	console.log(`Quadra listening on http://localhost:${port}`);
 });
+
+//test  comment 
