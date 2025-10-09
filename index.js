@@ -226,6 +226,51 @@ async function run() {
       }
     });
 
+	// ***************** Create a new post *****************
+	app.post("/posts/:id/comments",async(req,res)=>{
+		try{
+			const {id}=req.params;
+			const {userId,userName,avatar,text}=req.body
+			if (!text) return res.status(400).send({ message: "Comment text is required" });
+			const comment = {userId,userName,avatar,text,createdAt: new Date()};
+			const result = await db.collection("posts").updateOne(
+				{_id: new ObjectId(id)},
+				{$push: {comments: comment}} ,{ $set: { updatedAt: new Date()}}
+			)
+			if (result.modifiedCount === 0) {
+      return res.status(404).send({ message: "Post not found" });
+    }
+
+    res.status(201).send({ message: "Comment added successfully", comment });
+		} catch(error){
+			console.error("Failed to add comment:", error);
+			res.status(500).send({ message: "Internal server error" });
+		}
+	})
+// comment get route 
+app.get("/posts/:id/comments", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Find the post by its ID
+    const post = await db.collection("posts").findOne({ _id: new ObjectId(id) });
+
+    // If post not found, return 404
+    if (!post) {
+      return res.status(404).send({ message: "Post not found" });
+    }
+
+    // Return all comments of that post
+    res.status(200).send(post.comments || []);
+  } catch (error) {
+    console.error("Failed to fetch comments:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
+});
+
+
+
+
  
 
 
