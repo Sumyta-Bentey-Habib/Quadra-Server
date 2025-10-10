@@ -12,7 +12,7 @@ const { Server } = require("socket.io");
 const io = new Server(server, {
 	cors: {
 		origin: function (origin, callback) {
-			// Allow requests with no origin (mobile apps, etc.)
+			// Allow requests with no origin
 			if (!origin) return callback(null, true);
 
 			const allowedOrigins = [
@@ -30,7 +30,6 @@ const io = new Server(server, {
 			callback(new Error("Not allowed by CORS"));
 		},
 		methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-		credentials: true,
 	},
 });
 
@@ -584,7 +583,7 @@ async function run() {
 		});
 
 		// Add members to group
-		app.put("/conversations/:conversationId/members", async (req, res) => {
+		app.put("/conversations/members/:conversationId", async (req, res) => {
 			try {
 				const { conversationId } = req.params;
 				const { newMemberIds } = req.body;
