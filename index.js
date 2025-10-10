@@ -2,7 +2,6 @@ const express = require("express");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
 const cors = require("cors");
-
 const app = express();
 const port = process.env.PORT || 5000;
 
@@ -398,13 +397,96 @@ app.get("/posts/:id/comments", async (req, res) => {
   }
 });
 
+            /*
+    =================================Bookmarks API ROUTES====================================
+            */
+
+// POST → Add a bookmark
+app.post("/bookmarks", async (req, res) => {
+  try {
+    const { userId, postId } = req.body;
+
+    if (!ObjectId.isValid(userId) || !ObjectId.isValid(postId)) {
+      return res.status(400).send({ message: "Invalid userId or postId" });
+    }
+
+    const user = await userCollection.findOne({ _id: new ObjectId(userId) });
+    if (!user) return res.status(404).send({ message: "User not found" });
+
+    // Create bookmarks array if missing
+    if (!user.bookmarks) user.bookmarks = [];
+
+    // Prevent duplicate bookmarks
+    if (user.bookmarks.some((id) => id.equals(new ObjectId(postId)))) {
+      return res.status(400).send({ message: "Post already bookmarked" });
+    }
+
+    await userCollection.updateOne(
+      { _id: new ObjectId(userId) },
+      { $push: { bookmarks: new ObjectId(postId) } }
+    );
+
+    res.status(201).send({ message: "Post bookmarked successfully" });
+  } catch (error) {
+    console.error("Failed to add bookmark:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
+});
+
+// GET → Get all bookmarks for a user
+app.get("/bookmarks/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    if (!ObjectId.isValid(userId)) {
+      return res.status(400).send({ message: "Invalid userId" });
+    }
+
+    const user = await userCollection.findOne({ _id: new ObjectId(userId) });
+    if (!user) return res.status(404).send({ message: "User not found" });
+
+    const bookmarkedPostIds = user.bookmarks || [];
+    if (bookmarkedPostIds.length === 0)
+      return res.status(200).send([]);
+
+    const bookmarkedPosts = await postCollection
+      .find({ _id: { $in: bookmarkedPostIds } })
+      .toArray();
+
+    res.status(200).send(bookmarkedPosts);
+  } catch (error) {
+    console.error("Failed to get bookmarks:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
+});
+
+// DELETE → Remove a bookmark
+app.delete("/bookmarks/:userId/:postId", async (req, res) => {
+  try {
+    const { userId, postId } = req.params;
+    if (!ObjectId.isValid(userId) || !ObjectId.isValid(postId)) {
+      return res.status(400).send({ message: "Invalid userId or postId" });
+    }
+
+    await userCollection.updateOne(
+      { _id: new ObjectId(userId) },
+      { $pull: { bookmarks: new ObjectId(postId) } }
+    );
+
+    res.status(200).send({ message: "Bookmark removed successfully" });
+  } catch (error) {
+    console.error("Failed to remove bookmark:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
+});
+
+
 
 
 
  
 
 		// Get user status
-		app.get("/users/:userId/status", async (req, res) => {
+		app.get("/users/status/:userId", async (req, res) => {
 			try {
 				const { userId } = req.params;
 				const user = await userCollection.findOne({ _id: new ObjectId(userId) });
@@ -1288,27 +1370,6 @@ app.get("/posts/:id/comments", async (req, res) => {
 				console.log("A user disconnected:", socket.id);
 			});
 		});
-
-
-		/*
-		=======================================================
-		(post related APIs will be here)
-		=======================================================
-		*/
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 	} catch (error) {
 		console.error(" MongoDB connection failed:", error);
 	} finally {
