@@ -665,7 +665,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 									_id: 1,
 									name: 1,
 									email: 1,
-									imageUrl: 1,
+									photoUrl: 1,
 								},
 							},
 						},
@@ -789,7 +789,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 									_id: 1,
 									name: 1,
 									email: 1,
-									imageUrl: 1,
+									photoUrl: 1,
 								},
 							},
 						},
@@ -901,7 +901,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 								deleted: 1,
 								status: 1,
 								"sender.name": 1,
-								"sender.imageUrl": 1,
+								"sender.photoUrl": 1,
 							},
 						},
 						{ $sort: { createdAt: 1 } },
@@ -971,7 +971,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 				// Fetch sender details
 				const sender = await userCollection.findOne(
 					{ _id: new ObjectId(senderId) },
-					{ projection: { name: 1, imageUrl: 1 } },
+					{ projection: { name: 1, photoUrl: 1 } },
 				);
 
 				const fullMessage = {
@@ -1058,7 +1058,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 								conversationId: 1,
 								edited: 1,
 								"sender.name": 1,
-								"sender.imageUrl": 1,
+								"sender.photoUrl": 1,
 							},
 						},
 					])
@@ -1126,7 +1126,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 								edited: 1,
 								deleted: 1,
 								"sender.name": 1,
-								"sender.imageUrl": 1,
+								"sender.photoUrl": 1,
 							},
 						},
 					])
@@ -1165,7 +1165,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 				const result = await messageCollection.insertOne(newMessage);
 				const sender = await userCollection.findOne(
 					{ _id: new ObjectId(senderId) },
-					{ projection: { name: 1, imageUrl: 1 } },
+					{ projection: { name: 1, photoUrl: 1 } },
 				);
 
 				const fullMessage = { ...newMessage, _id: result.insertedId, sender };
