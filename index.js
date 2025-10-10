@@ -11,7 +11,7 @@ const { Server } = require("socket.io");
 const io = new Server(server, {
 	cors: {
 		origin: function (origin, callback) {
-			// Allow requests with no origin (mobile apps, etc.)
+			// Allow requests with no origin
 			if (!origin) return callback(null, true);
 
 			const allowedOrigins = [
@@ -19,7 +19,7 @@ const io = new Server(server, {
 				"https://quadra-blush.vercel.app",
 				"http://localhost:3001",
 				"http://127.0.0.1:3000",
-				"http://127.0.0.1:3001"
+				"http://127.0.0.1:3001",
 			];
 
 			if (allowedOrigins.includes(origin)) {
@@ -29,7 +29,6 @@ const io = new Server(server, {
 			callback(new Error("Not allowed by CORS"));
 		},
 		methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-		credentials: true,
 	},
 });
 
@@ -87,33 +86,33 @@ async function run() {
 				const filter = userEmail ? { email: userEmail } : {};
 
 				const result = await userCollection.find(filter).toArray();
-				
+
 				// Add online status to users
-				const usersWithStatus = result.map(user => ({
+				const usersWithStatus = result.map((user) => ({
 					...user,
 					isOnline: onlineUsers.has(user._id.toString()),
-					lastSeen: onlineUsers.get(user._id.toString())?.lastSeen || user.lastSeen
+					lastSeen: onlineUsers.get(user._id.toString())?.lastSeen || user.lastSeen,
 				}));
-				
+
 				res.status(200).send(usersWithStatus);
 			} catch (error) {
 				console.error("Failed to get users:", error);
 				res.status(500).send({ message: "Internal server error" });
 			}
 		});
-		
+
 		app.get("/users/:id", async (req, res) => {
 			try {
 				const id = req.params.id;
 
 				if (!ObjectId.isValid(id)) {
-				return res.status(400).send({ message: "Invalid user ID" });
+					return res.status(400).send({ message: "Invalid user ID" });
 				}
 
 				const user = await userCollection.findOne({ _id: new ObjectId(id) });
 
 				if (!user) {
-				return res.status(404).send({ message: "User not found" });
+					return res.status(404).send({ message: "User not found" });
 				}
 
 				res.status(200).send(user);
@@ -121,282 +120,217 @@ async function run() {
 				console.error("Failed to get user by ID:", error);
 				res.status(500).send({ message: "Internal server error" });
 			}
-			});
-    
-		
+		});
+
 		// PUT /users/:id
 		app.put("/users/:id", async (req, res) => {
-		try {
-			const { id } = req.params;
-			const { name, photoUrl, bio, twitter, linkedin, portfolio } = req.body;
+			try {
+				const { id } = req.params;
+				const { name, photoUrl, bio, twitter, linkedin, portfolio } = req.body;
 
-			const updateData = {};
+				const updateData = {};
 
-			if (name) updateData.name = name;
-			if (photoUrl) updateData.photoUrl = photoUrl;
-			if (bio) updateData.bio = bio;
-			if (twitter) updateData.twitter = twitter;
-			if (linkedin) updateData.linkedin = linkedin;
-			if (portfolio) updateData.portfolio = portfolio;
+				if (name) updateData.name = name;
+				if (photoUrl) updateData.photoUrl = photoUrl;
+				if (bio) updateData.bio = bio;
+				if (twitter) updateData.twitter = twitter;
+				if (linkedin) updateData.linkedin = linkedin;
+				if (portfolio) updateData.portfolio = portfolio;
 
-			const result = await userCollection.updateOne(
-			{ _id: new ObjectId(id) },
-			{ $set: updateData }
-			);
+				const result = await userCollection.updateOne({ _id: new ObjectId(id) }, { $set: updateData });
 
-			if (result.matchedCount === 0) {
-			return res.status(404).send({ message: "User not found" });
+				if (result.matchedCount === 0) {
+					return res.status(404).send({ message: "User not found" });
+				}
+
+				const updatedUser = await userCollection.findOne({ _id: new ObjectId(id) });
+				res.status(200).send(updatedUser);
+			} catch (error) {
+				console.error("Failed to update user:", error);
+				res.status(500).send({ message: "Internal server error" });
 			}
-
-			const updatedUser = await userCollection.findOne({ _id: new ObjectId(id) });
-			res.status(200).send(updatedUser);
-		} catch (error) {
-			console.error("Failed to update user:", error);
-			res.status(500).send({ message: "Internal server error" });
-		}
 		});
 
-    
+		// Get user status
+		app.get("/users/status/:userId", async (req, res) => {
+			try {
+				const { userId } = req.params;
+				const user = await userCollection.findOne({ _id: new ObjectId(userId) });
 
-    // Create a new post
-    app.post("/posts", async (req, res) => {
-      try {
-        const { userId, userName, avatar, text, images } = req.body;
-        if (!userId || (!text && (!images || images.length === 0))) {
-          return res.status(400).send({ message: "Post content is required" });
-        }
+				if (!user) {
+					return res.status(404).send({ message: "User not found" });
+				}
 
-        const newPost = {
-          userId: new ObjectId(userId),
-          userName: userName || "Anonymous",
-          avatar : avatar || "https://i.pravatar.cc/100",
-          text,
-          images: images || [],
-          likes: [], 
-          comments: [],
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        };
+				res.status(200).send({
+					isOnline: onlineUsers.has(userId),
+					lastSeen: onlineUsers.get(userId)?.lastSeen || user.lastSeen || null,
+				});
+			} catch (error) {
+				console.error("Failed to get user status:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
 
-        const result = await postCollection.insertOne(newPost);
-        res.status(201).send({ ...newPost, _id: result.insertedId });
-      } catch (error) {
-        console.error("Failed to create post:", error);
-        res.status(500).send({ message: "Internal server error" });
-      }
-    });
+		// Create a new post
+		app.post("/posts", async (req, res) => {
+			try {
+				const { userId, userName, avatar, text, images } = req.body;
+				if (!userId || (!text && (!images || images.length === 0))) {
+					return res.status(400).send({ message: "Post content is required" });
+				}
 
+				const newPost = {
+					userId: new ObjectId(userId),
+					userName: userName || "Anonymous",
+					avatar: avatar || "https://i.pravatar.cc/100",
+					text,
+					images: images || [],
+					likes: [],
+					comments: [],
+					createdAt: new Date(),
+					updatedAt: new Date(),
+				};
 
+				const result = await postCollection.insertOne(newPost);
+				res.status(201).send({ ...newPost, _id: result.insertedId });
+			} catch (error) {
+				console.error("Failed to create post:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
 
-    // * Get a single post by ID
-    // ! Get all posts by a specific user
-    // * Get all posts
-    app.get("/posts", async (req, res) => {
-      try {
-        // ! can pass ?postId= or ?userId=
-        const { postId, userId } = req.query; 
+		// * Get a single post by ID
+		// ! Get all posts by a specific user
+		// * Get all posts
+		app.get("/posts", async (req, res) => {
+			try {
+				// ! can pass ?postId= or ?userId=
+				const { postId, userId } = req.query;
 
-        // 1. Get a single post by ID
-        if (postId) {
-          if (!ObjectId.isValid(postId))
-            return res.status(400).send({ message: "Invalid Post ID" });
+				// 1. Get a single post by ID
+				if (postId) {
+					if (!ObjectId.isValid(postId)) return res.status(400).send({ message: "Invalid Post ID" });
 
-          const post = await postCollection.findOne({ _id: new ObjectId(postId) });
-          if (!post) return res.status(404).send({ message: "Post not found" });
-          return res.status(200).send(post);
-        }
+					const post = await postCollection.findOne({ _id: new ObjectId(postId) });
+					if (!post) return res.status(404).send({ message: "Post not found" });
+					return res.status(200).send(post);
+				}
 
-        // 2. Get all posts by a specific user 
-        if (userId) {
-        if (!ObjectId.isValid(userId))
-          return res.status(400).send({ message: "Invalid User ID" });
+				// 2. Get all posts by a specific user
+				if (userId) {
+					if (!ObjectId.isValid(userId)) return res.status(400).send({ message: "Invalid User ID" });
 
-        const userPosts = await postCollection
-          .find({ userId: new ObjectId(userId) }) // convert to ObjectId
-          .sort({ createdAt: -1 })
-          .toArray();
-        return res.status(200).send(userPosts);
-      }
+					const userPosts = await postCollection
+						.find({ userId: new ObjectId(userId) }) // convert to ObjectId
+						.sort({ createdAt: -1 })
+						.toArray();
+					return res.status(200).send(userPosts);
+				}
 
+				// 3. Get all posts
+				const posts = await postCollection.find({}).sort({ createdAt: -1 }).toArray();
+				return res.status(200).send(posts);
+			} catch (error) {
+				console.error("Failed to fetch posts:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
 
-        // 3. Get all posts
-        const posts = await postCollection
-          .find({})
-          .sort({ createdAt: -1 })
-          .toArray();
-        return res.status(200).send(posts);
-      } catch (error) {
-        console.error("Failed to fetch posts:", error);
-        res.status(500).send({ message: "Internal server error" });
-      }
-	});
-		
-		
-		
 		// PATCH /posts/:postId
 		app.patch("/posts/:postId", async (req, res) => {
-		try {
-			const { postId } = req.params;
-			const { text, images } = req.body;
+			try {
+				const { postId } = req.params;
+				const { text, images } = req.body;
 
-			if (!ObjectId.isValid(postId)) {
-			return res.status(400).send({ message: "Invalid Post ID" });
+				if (!ObjectId.isValid(postId)) {
+					return res.status(400).send({ message: "Invalid Post ID" });
+				}
+
+				const updateData = {};
+				if (text) updateData.text = text;
+				if (images) updateData.images = images;
+				updateData.updatedAt = new Date();
+
+				const result = await postCollection.updateOne({ _id: new ObjectId(postId) }, { $set: updateData });
+
+				if (result.matchedCount === 0) {
+					return res.status(404).send({ message: "Post not found" });
+				}
+
+				const updatedPost = await postCollection.findOne({ _id: new ObjectId(postId) });
+				res.status(200).send(updatedPost);
+			} catch (error) {
+				console.error("Failed to update post:", error);
+				res.status(500).send({ message: "Internal server error" });
 			}
-
-			const updateData = {};
-			if (text) updateData.text = text;
-			if (images) updateData.images = images;
-			updateData.updatedAt = new Date();
-
-			const result = await postCollection.updateOne(
-			{ _id: new ObjectId(postId) },
-			{ $set: updateData }
-			);
-
-			if (result.matchedCount === 0) {
-			return res.status(404).send({ message: "Post not found" });
-			}
-
-			const updatedPost = await postCollection.findOne({ _id: new ObjectId(postId) });
-			res.status(200).send(updatedPost);
-		} catch (error) {
-			console.error("Failed to update post:", error);
-			res.status(500).send({ message: "Internal server error" });
-		}
 		});
 
+		// Delete Post
+		app.delete("/posts/:postId", async (req, res) => {
+			try {
+				const { postId } = req.params;
 
-		
+				if (!ObjectId.isValid(postId)) {
+					return res.status(400).send({ message: "Invalid Post ID" });
+				}
 
-    // Delete Post
-    app.delete("/posts/:postId", async (req, res) => {
-      try {
-        const { postId } = req.params;
+				const result = await postCollection.deleteOne({ _id: new ObjectId(postId) });
 
-        if (!ObjectId.isValid(postId)) {
-          return res.status(400).send({ message: "Invalid Post ID" });
-        }
+				if (result.deletedCount === 0) {
+					return res.status(404).send({ message: "Post not found or already deleted" });
+				}
 
-        const result = await postCollection.deleteOne({ _id: new ObjectId(postId) });
+				res.status(200).send({ message: "Post deleted successfully" });
+			} catch (error) {
+				console.error("Failed to delete post:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
 
-        if (result.deletedCount === 0) {
-          return res.status(404).send({ message: "Post not found or already deleted" });
-        }
+		// ***************** Create a new post *****************
+		app.post("/posts/:id/comments", async (req, res) => {
+			try {
+				const { id } = req.params;
+				const { userId, userName, avatar, text } = req.body;
 
-        res.status(200).send({ message: "Post deleted successfully" });
-      } catch (error) {
-        console.error("Failed to delete post:", error);
-        res.status(500).send({ message: "Internal server error" });
-      }
-    });
+				if (!ObjectId.isValid(id)) return res.status(400).send({ message: "Invalid post ID" });
 
-	// ***************** Create a new post *****************
-	app.post("/posts/:id/comments", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { userId, userName, avatar, text } = req.body;
+				if (!text) return res.status(400).send({ message: "Comment text is required" });
 
-    if (!ObjectId.isValid(id))
-      return res.status(400).send({ message: "Invalid post ID" });
+				const comment = {
+					_id: new ObjectId(), // unique ID for comment
+					userId,
+					userName,
+					avatar,
+					text,
+					createdAt: new Date(),
+					replies: [],
+				};
 
-    if (!text) return res.status(400).send({ message: "Comment text is required" });
+				const result = await db
+					.collection("posts")
+					.updateOne({ _id: new ObjectId(id) }, { $push: { comments: comment }, $set: { updatedAt: new Date() } });
 
-    const comment = {
-      _id: new ObjectId(), // unique ID for comment
-      userId,
-      userName,
-      avatar,
-      text,
-      createdAt: new Date(),
-      replies: [],
-    };
+				if (result.modifiedCount === 0) return res.status(404).send({ message: "Post not found" });
 
-    const result = await db.collection("posts").updateOne(
-      { _id: new ObjectId(id) },
-      { $push: { comments: comment }, $set: { updatedAt: new Date() } }
-    );
+				res.status(201).send({ message: "Comment added successfully", comment });
+			} catch (error) {
+				console.error("Failed to add comment:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
+		// comment get route
+		app.get("/posts/:id/comments", async (req, res) => {
+			try {
+				const { id } = req.params;
 
-    if (result.modifiedCount === 0)
-      return res.status(404).send({ message: "Post not found" });
+				// Find the post by its ID
+				const post = await db.collection("posts").findOne({ _id: new ObjectId(id) });
 
-    res.status(201).send({ message: "Comment added successfully", comment });
-  } catch (error) {
-    console.error("Failed to add comment:", error);
-    res.status(500).send({ message: "Internal server error" });
-  }
-});
-// comment get route 
-app.get("/posts/:id/comments", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Find the post by its ID
-    const post = await db.collection("posts").findOne({ _id: new ObjectId(id) });
-
-    // If post not found, return 404
-    if (!post) {
-      return res.status(404).send({ message: "Post not found" });
-    }
-
-    // Return all comments of that post
-    res.status(200).send(post.comments || []);
-  } catch (error) {
-    console.error("Failed to fetch comments:", error);
-    res.status(500).send({ message: "Internal server error" });
-  }
-});
-
-//****************************************** */
-
-
-//********************   create comment replies route   ***************** */
-
-app.post("/posts/:postId/comments/:commentId/replies", async (req, res) => {
-  try {
-    const { postId, commentId } = req.params;
-    const { userId, userName, avatar, text } = req.body;
-
-    if (!text) return res.status(400).send({ message: "Reply text is required" });
-
-    if (!ObjectId.isValid(postId) || !ObjectId.isValid(commentId)) {
-      return res.status(400).send({ message: "Invalid postId or commentId" });
-    }
-
-    const reply = {
-      userId,
-      userName,
-      avatar,
-      text,
-      createdAt: new Date(),
-    };
-
-    const result = await db.collection("posts").updateOne(
-      { _id: new ObjectId(postId), "comments._id": new ObjectId(commentId) },
-      { $push: { "comments.$.replies": reply }, $set: { updatedAt: new Date() } }
-    );
-
-    if (result.modifiedCount === 0) {
-      return res.status(404).send({ message: "Post or comment not found" });
-    }
-
-    res.status(201).send({ message: "Reply added successfully", reply });
-  } catch (error) {
-    console.error("Failed to add reply:", error);
-    res.status(500).send({ message: "Internal server error" });
-  }
-});
-app.get("/posts/:id/comments", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const post = await db.collection("posts").findOne({ _id: new ObjectId(id) });
-    if (!post) return res.status(404).send({ message: "Post not found" });
-    res.status(200).send(post.comments || []);
-  } catch (error) {
-    console.error("Failed to fetch comments:", error);
-    res.status(500).send({ message: "Internal server error" });
-  }
-});
-
+				// If post not found, return 404
+				if (!post) {
+					return res.status(404).send({ message: "Post not found" });
+				}
             /*
     =================================Bookmarks API ROUTES====================================
             */
@@ -481,26 +415,62 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 
 
 
+				// Return all comments of that post
+				res.status(200).send(post.comments || []);
+			} catch (error) {
+				console.error("Failed to fetch comments:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
 
+		//****************************************** */
 
- 
+		//********************   create comment replies route   ***************** */
 
-		// Get user status
-		app.get("/users/status/:userId", async (req, res) => {
+		app.post("/posts/:postId/comments/:commentId/replies", async (req, res) => {
 			try {
-				const { userId } = req.params;
-				const user = await userCollection.findOne({ _id: new ObjectId(userId) });
-				
-				if (!user) {
-					return res.status(404).send({ message: "User not found" });
+				const { postId, commentId } = req.params;
+				const { userId, userName, avatar, text } = req.body;
+
+				if (!text) return res.status(400).send({ message: "Reply text is required" });
+
+				if (!ObjectId.isValid(postId) || !ObjectId.isValid(commentId)) {
+					return res.status(400).send({ message: "Invalid postId or commentId" });
 				}
 
-				res.status(200).send({
-					isOnline: onlineUsers.has(userId),
-					lastSeen: onlineUsers.get(userId)?.lastSeen || user.lastSeen || null
-				});
+				const reply = {
+					userId,
+					userName,
+					avatar,
+					text,
+					createdAt: new Date(),
+				};
+
+				const result = await db
+					.collection("posts")
+					.updateOne(
+						{ _id: new ObjectId(postId), "comments._id": new ObjectId(commentId) },
+						{ $push: { "comments.$.replies": reply }, $set: { updatedAt: new Date() } },
+					);
+
+				if (result.modifiedCount === 0) {
+					return res.status(404).send({ message: "Post or comment not found" });
+				}
+
+				res.status(201).send({ message: "Reply added successfully", reply });
 			} catch (error) {
-				console.error("Failed to get user status:", error);
+				console.error("Failed to add reply:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
+		app.get("/posts/:id/comments", async (req, res) => {
+			try {
+				const { id } = req.params;
+				const post = await db.collection("posts").findOne({ _id: new ObjectId(id) });
+				if (!post) return res.status(404).send({ message: "Post not found" });
+				res.status(200).send(post.comments || []);
+			} catch (error) {
+				console.error("Failed to fetch comments:", error);
 				res.status(500).send({ message: "Internal server error" });
 			}
 		});
@@ -609,7 +579,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 			const { participants } = req.body;
 			const conversation = await conversationCollection.findOne({
 				participants: { $all: participants.map((id) => new ObjectId(id)) },
-				isGroup: false
+				isGroup: false,
 			});
 
 			if (conversation) {
@@ -644,7 +614,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 				};
 
 				const result = await conversationCollection.insertOne(newConversation);
-				
+
 				// Fetch full conversation with participant details
 				const fullConversation = await conversationCollection
 					.aggregate([
@@ -679,10 +649,10 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 
 				// Emit to all participants with proper error handling
 				try {
-					participants.forEach(participantId => {
+					participants.forEach((participantId) => {
 						io.to(`user_${participantId}`).emit("newConversation", fullConversation[0]);
 					});
-					console.log(`Emitted newConversation to participants: ${participants.join(', ')}`);
+					console.log(`Emitted newConversation to participants: ${participants.join(", ")}`);
 				} catch (error) {
 					console.error("Failed to emit newConversation:", error);
 				}
@@ -695,7 +665,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 		});
 
 		// Add members to group
-		app.put("/conversations/:conversationId/members", async (req, res) => {
+		app.put("/conversations/members/:conversationId", async (req, res) => {
 			try {
 				const { conversationId } = req.params;
 				const { newMemberIds } = req.body;
@@ -705,7 +675,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 				}
 
 				const conversation = await conversationCollection.findOne({ _id: new ObjectId(conversationId) });
-				
+
 				if (!conversation) {
 					return res.status(404).send({ message: "Conversation not found" });
 				}
@@ -716,8 +686,8 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 
 				// Add new members (avoid duplicates)
 				const newMembers = newMemberIds
-					.map(id => new ObjectId(id))
-					.filter(id => !conversation.participants.some(p => p.equals(id)));
+					.map((id) => new ObjectId(id))
+					.filter((id) => !conversation.participants.some((p) => p.equals(id)));
 
 				if (newMembers.length === 0) {
 					return res.status(400).send({ message: "All members already in group" });
@@ -725,10 +695,10 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 
 				await conversationCollection.updateOne(
 					{ _id: new ObjectId(conversationId) },
-					{ 
+					{
 						$push: { participants: { $each: newMembers } },
-						$set: { updatedAt: new Date() }
-					}
+						$set: { updatedAt: new Date() },
+					},
 				);
 
 				// Fetch updated conversation
@@ -747,11 +717,14 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 					.toArray();
 
 				// Emit to all participants including new ones
-				const allParticipants = [...conversation.participants.map(p => p.toString()), ...newMembers.map(p => p.toString())];
-				allParticipants.forEach(participantId => {
+				const allParticipants = [
+					...conversation.participants.map((p) => p.toString()),
+					...newMembers.map((p) => p.toString()),
+				];
+				allParticipants.forEach((participantId) => {
 					io.to(`user_${participantId}`).emit("conversationMembersUpdated", {
 						conversationId,
-						conversation: updatedConversation[0]
+						conversation: updatedConversation[0],
 					});
 				});
 
@@ -800,13 +773,13 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 					.toArray();
 
 				// Add online status to participants
-				const conversationsWithStatus = result.map(conv => ({
+				const conversationsWithStatus = result.map((conv) => ({
 					...conv,
-					participantDetails: conv.participantDetails.map(p => ({
+					participantDetails: conv.participantDetails.map((p) => ({
 						...p,
 						isOnline: onlineUsers.has(p._id.toString()),
-						lastSeen: onlineUsers.get(p._id.toString())?.lastSeen
-					}))
+						lastSeen: onlineUsers.get(p._id.toString())?.lastSeen,
+					})),
 				}));
 
 				res.status(200).send(conversationsWithStatus);
@@ -854,11 +827,11 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 				// Add online status
 				const conversationWithStatus = {
 					...conversation[0],
-					participantDetails: conversation[0].participantDetails.map(p => ({
+					participantDetails: conversation[0].participantDetails.map((p) => ({
 						...p,
 						isOnline: onlineUsers.has(p._id.toString()),
-						lastSeen: onlineUsers.get(p._id.toString())?.lastSeen
-					}))
+						lastSeen: onlineUsers.get(p._id.toString())?.lastSeen,
+					})),
 				};
 
 				res.status(200).send(conversationWithStatus);
@@ -946,7 +919,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 						delivered: false,
 						read: false,
 						deliveredAt: null,
-						readAt: null
+						readAt: null,
 					},
 					createdAt: new Date(),
 					updatedAt: new Date(),
@@ -984,10 +957,10 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 
 				// Emit socket event to conversation room
 				io.to(conversationId).emit("newMessage", fullMessage);
-				
+
 				// Emit socket event to update sidebar for all participants
 				const conversation = await conversationCollection.findOne({ _id: new ObjectId(conversationId) });
-				conversation.participants.forEach(participantId => {
+				conversation.participants.forEach((participantId) => {
 					io.to(`user_${participantId.toString()}`).emit("conversationUpdated", {
 						conversationId,
 						lastMessage: {
@@ -1017,7 +990,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 				}
 
 				const message = await messageCollection.findOne({ _id: new ObjectId(messageId) });
-				
+
 				if (!message) {
 					return res.status(404).send({ message: "Message not found" });
 				}
@@ -1029,13 +1002,13 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 
 				await messageCollection.updateOne(
 					{ _id: new ObjectId(messageId) },
-					{ 
-						$set: { 
-							text, 
-							edited: true, 
-							updatedAt: new Date() 
-						} 
-					}
+					{
+						$set: {
+							text,
+							edited: true,
+							updatedAt: new Date(),
+						},
+					},
 				);
 
 				const updatedMessage = await messageCollection
@@ -1083,7 +1056,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 				const { senderId } = req.body;
 
 				const message = await messageCollection.findOne({ _id: new ObjectId(messageId) });
-				
+
 				if (!message) {
 					return res.status(404).send({ message: "Message not found" });
 				}
@@ -1095,13 +1068,13 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 
 				await messageCollection.updateOne(
 					{ _id: new ObjectId(messageId) },
-					{ 
-						$set: { 
+					{
+						$set: {
 							text: "This message was deleted",
 							deleted: true,
-							updatedAt: new Date() 
-						} 
-					}
+							updatedAt: new Date(),
+						},
+					},
 				);
 
 				// Fetch the updated message with sender details to broadcast
@@ -1165,7 +1138,10 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 				};
 
 				const result = await messageCollection.insertOne(newMessage);
-				const sender = await userCollection.findOne({ _id: new ObjectId(senderId) }, { projection: { name: 1, imageUrl: 1 } });
+				const sender = await userCollection.findOne(
+					{ _id: new ObjectId(senderId) },
+					{ projection: { name: 1, imageUrl: 1 } },
+				);
 
 				const fullMessage = { ...newMessage, _id: result.insertedId, sender };
 
@@ -1201,7 +1177,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 					socket.userId = userId;
 					onlineUsers.set(userId, {
 						socketId: socket.id,
-						lastSeen: new Date()
+						lastSeen: new Date(),
 					});
 					socket.join(`user_${userId}`);
 
@@ -1209,7 +1185,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 					socket.broadcast.emit("userStatusChanged", {
 						userId,
 						isOnline: true,
-						lastSeen: new Date()
+						lastSeen: new Date(),
 					});
 
 					console.log(`User ${userId} authenticated and is online`);
@@ -1224,7 +1200,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 				socket.userId = userId;
 				onlineUsers.set(userId, {
 					socketId: socket.id,
-					lastSeen: new Date()
+					lastSeen: new Date(),
 				});
 				socket.join(`user_${userId}`);
 
@@ -1232,7 +1208,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 				socket.broadcast.emit("userStatusChanged", {
 					userId,
 					isOnline: true,
-					lastSeen: new Date()
+					lastSeen: new Date(),
 				});
 
 				console.log(`User ${userId} is online (legacy)`);
@@ -1255,7 +1231,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 				socket.to(conversationId).emit("userTyping", {
 					userId,
 					userName,
-					isTyping
+					isTyping,
 				});
 			});
 
@@ -1288,15 +1264,15 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 						{
 							$set: {
 								"status.delivered": true,
-								"status.deliveredAt": new Date()
-							}
-						}
+								"status.deliveredAt": new Date(),
+							},
+						},
 					);
 
 					// Broadcast status update to all conversation participants
 					io.to(message.conversationId.toString()).emit("messageStatusUpdated", {
 						messageId,
-						status: { delivered: true, deliveredAt: new Date() }
+						status: { delivered: true, deliveredAt: new Date() },
 					});
 				} catch (error) {
 					console.error("Failed to update message delivered status:", error);
@@ -1325,15 +1301,15 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 						{
 							$set: {
 								"status.read": true,
-								"status.readAt": new Date()
-							}
-						}
+								"status.readAt": new Date(),
+							},
+						},
 					);
 
 					// Broadcast status update to all conversation participants
 					io.to(message.conversationId.toString()).emit("messageStatusUpdated", {
 						messageId,
-						status: { read: true, readAt: new Date() }
+						status: { read: true, readAt: new Date() },
 					});
 				} catch (error) {
 					console.error("Failed to update message read status:", error);
@@ -1347,22 +1323,21 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 					if (userData.socketId === socket.id) {
 						disconnectedUserId = userId;
 						const lastSeen = new Date();
-						
+
 						// Update last seen in database
-						userCollection.updateOne(
-							{ _id: new ObjectId(userId) },
-							{ $set: { lastSeen } }
-						).catch(err => console.error("Failed to update lastSeen:", err));
-						
+						userCollection
+							.updateOne({ _id: new ObjectId(userId) }, { $set: { lastSeen } })
+							.catch((err) => console.error("Failed to update lastSeen:", err));
+
 						onlineUsers.delete(userId);
-						
+
 						// Broadcast user is offline
-						socket.broadcast.emit("userStatusChanged", { 
-							userId, 
+						socket.broadcast.emit("userStatusChanged", {
+							userId,
 							isOnline: false,
-							lastSeen
+							lastSeen,
 						});
-						
+
 						console.log(`User ${userId} disconnected`);
 						break;
 					}
