@@ -104,7 +104,7 @@ async function run() {
 		});
 
 		// Get user status
-		app.get("/users/:userId/status", async (req, res) => {
+		app.get("/users/status/:userId", async (req, res) => {
 			try {
 				const { userId } = req.params;
 				const user = await userCollection.findOne({ _id: new ObjectId(userId) });
