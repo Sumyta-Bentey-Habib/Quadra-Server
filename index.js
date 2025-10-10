@@ -265,6 +265,65 @@ async function run() {
 			}
 		});
 
+
+
+		// PATCH → Like or react to a post
+		app.patch("/posts/:postId/like", async (req, res) => {
+		try {
+			const { postId } = req.params;
+			const { userId, userName, avatar, reaction } = req.body; 
+
+			if (!ObjectId.isValid(postId) || !ObjectId.isValid(userId)) {
+			return res.status(400).send({ message: "Invalid postId or userId" });
+			}
+
+			const post = await postCollection.findOne({ _id: new ObjectId(postId) });
+			if (!post) return res.status(404).send({ message: "Post not found" });
+
+			// Check if user already reacted
+			const existingIndex = post.likes.findIndex(l => l.userId.equals(new ObjectId(userId)));
+
+			if (existingIndex !== -1) {
+			// User already reacted
+			if (reaction === null || reaction === post.likes[existingIndex].reaction) {
+				// Remove reaction if clicking same again or null
+				post.likes.splice(existingIndex, 1);
+			} else {
+				// Update reaction
+				post.likes[existingIndex].reaction = reaction;
+				post.likes[existingIndex].userName = userName;
+				post.likes[existingIndex].avatar = avatar;
+			}
+			} else {
+			// Add new reaction
+			post.likes.push({ 
+				userId: new ObjectId(userId), 
+				userName, 
+				avatar, 
+				reaction 
+			});
+			}
+
+			// Save updated post
+			await postCollection.updateOne(
+			{ _id: new ObjectId(postId) },
+			{ $set: { likes: post.likes } }
+			);
+
+			const updatedPost = await postCollection.findOne({ _id: new ObjectId(postId) });
+			res.status(200).send(updatedPost);
+
+		} catch (error) {
+			console.error("Failed to like/react post:", error);
+			res.status(500).send({ message: "Internal server error" });
+		}
+		});
+
+
+
+
+		
+
 		// Delete Post
 		app.delete("/posts/:postId", async (req, res) => {
 			try {
