@@ -45,7 +45,7 @@ const client = new MongoClient(uri, {
 	},
 });
 
-let userCollection, conversationCollection, messageCollection, postCollection;
+	let userCollection, conversationCollection, messageCollection, postCollection, notificationCollection;
 
 // Track online users: { userId: { socketId, lastSeen } }
 const onlineUsers = new Map();
@@ -60,6 +60,7 @@ async function run() {
 		conversationCollection = db.collection("conversations");
 		messageCollection = db.collection("messages");
 		postCollection = db.collection("posts");
+		notificationCollection = db.collection("notifications");
 
 		// Indexes for faster queries
 		await messageCollection.createIndex({ conversationId: 1, createdAt: 1 });
@@ -1214,6 +1215,264 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 		});
 
 		/*
+		=======================
+		Notification API ROUTES
+		=======================
+		*/
+
+		// Get notifications for a user
+		app.get("/notifications/:userId", async (req, res) => {
+			try {
+				const { userId } = req.params;
+				const { type, read } = req.query;
+
+				if (!ObjectId.isValid(userId)) {
+					return res.status(400).send({ message: "Invalid user ID" });
+				}
+
+				// Build filter
+				let filter = { recipientId: new ObjectId(userId) };
+
+				if (type && type !== "all") {
+					filter.type = type;
+				}
+
+				if (read === "true") {
+					filter.read = true;
+				} else if (read === "false") {
+					filter.read = false;
+				}
+
+				const notifications = await notificationCollection
+					.aggregate([
+						{ $match: filter },
+						{
+							$lookup: {
+								from: "users",
+								localField: "senderId",
+								foreignField: "_id",
+								as: "sender",
+							},
+						},
+						{ $unwind: "$sender" },
+						{
+							$project: {
+								_id: 1,
+								type: 1,
+								content: 1,
+								postPreview: 1,
+								comment: 1,
+								read: 1,
+								createdAt: 1,
+								updatedAt: 1,
+								"sender.name": 1,
+								"sender.photoUrl": 1,
+							},
+						},
+						{ $sort: { createdAt: -1 } },
+					])
+					.toArray();
+
+				res.status(200).send(notifications);
+			} catch (error) {
+				console.error("Failed to fetch notifications:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
+
+		// Create a new notification
+		app.post("/notifications", async (req, res) => {
+			try {
+				const { recipientId, senderId, type, content, postPreview, comment, postId } = req.body;
+
+				if (!recipientId || !senderId || !type || !content) {
+					return res.status(400).send({ message: "Missing required fields" });
+				}
+
+				const newNotification = {
+					recipientId: new ObjectId(recipientId),
+					senderId: new ObjectId(senderId),
+					type,
+					content,
+					postPreview,
+					comment,
+					postId: postId ? new ObjectId(postId) : null,
+					read: false,
+					createdAt: new Date(),
+					updatedAt: new Date(),
+				};
+
+				const result = await notificationCollection.insertOne(newNotification);
+
+				// Fetch full notification with sender details
+				const fullNotification = await notificationCollection
+					.aggregate([
+						{ $match: { _id: result.insertedId } },
+						{
+							$lookup: {
+								from: "users",
+								localField: "senderId",
+								foreignField: "_id",
+								as: "sender",
+							},
+						},
+						{ $unwind: "$sender" },
+						{
+							$project: {
+								_id: 1,
+								type: 1,
+								content: 1,
+								postPreview: 1,
+								comment: 1,
+								read: 1,
+								createdAt: 1,
+								updatedAt: 1,
+								"sender.name": 1,
+								"sender.photoUrl": 1,
+							},
+						},
+					])
+					.toArray();
+
+				// Emit real-time notification to recipient
+				io.to(`user_${recipientId}`).emit("newNotification", fullNotification[0]);
+
+				res.status(201).send(fullNotification[0]);
+			} catch (error) {
+				console.error("Failed to create notification:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
+
+		// Mark notification as read
+		app.patch("/notifications/:notificationId/read", async (req, res) => {
+			try {
+				const { notificationId } = req.params;
+
+				if (!ObjectId.isValid(notificationId)) {
+					return res.status(400).send({ message: "Invalid notification ID" });
+				}
+
+				await notificationCollection.updateOne(
+					{ _id: new ObjectId(notificationId) },
+					{
+						$set: {
+							read: true,
+							updatedAt: new Date(),
+						},
+					},
+				);
+
+				const updatedNotification = await notificationCollection
+					.aggregate([
+						{ $match: { _id: new ObjectId(notificationId) } },
+						{
+							$lookup: {
+								from: "users",
+								localField: "senderId",
+								foreignField: "_id",
+								as: "sender",
+							},
+						},
+						{ $unwind: "$sender" },
+						{
+							$project: {
+								_id: 1,
+								type: 1,
+								content: 1,
+								postPreview: 1,
+								comment: 1,
+								read: 1,
+								createdAt: 1,
+								updatedAt: 1,
+								"sender.name": 1,
+								"sender.photoUrl": 1,
+							},
+						},
+					])
+					.toArray();
+
+				if (updatedNotification.length === 0) {
+					return res.status(404).send({ message: "Notification not found" });
+				}
+
+				res.status(200).send(updatedNotification[0]);
+			} catch (error) {
+				console.error("Failed to mark notification as read:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
+
+		// Mark all notifications as read for a user
+		app.patch("/notifications/user/:userId/read-all", async (req, res) => {
+			try {
+				const { userId } = req.params;
+
+				if (!ObjectId.isValid(userId)) {
+					return res.status(400).send({ message: "Invalid user ID" });
+				}
+
+				await notificationCollection.updateMany(
+					{ recipientId: new ObjectId(userId), read: false },
+					{
+						$set: {
+							read: true,
+							updatedAt: new Date(),
+						},
+					},
+				);
+
+				res.status(200).send({ message: "All notifications marked as read" });
+			} catch (error) {
+				console.error("Failed to mark all notifications as read:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
+
+		// Delete a notification
+		app.delete("/notifications/:notificationId", async (req, res) => {
+			try {
+				const { notificationId } = req.params;
+
+				if (!ObjectId.isValid(notificationId)) {
+					return res.status(400).send({ message: "Invalid notification ID" });
+				}
+
+				const result = await notificationCollection.deleteOne({ _id: new ObjectId(notificationId) });
+
+				if (result.deletedCount === 0) {
+					return res.status(404).send({ message: "Notification not found" });
+				}
+
+				res.status(200).send({ message: "Notification deleted successfully" });
+			} catch (error) {
+				console.error("Failed to delete notification:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
+
+		// Get unread notification count for a user
+		app.get("/notifications/:userId/count", async (req, res) => {
+			try {
+				const { userId } = req.params;
+
+				if (!ObjectId.isValid(userId)) {
+					return res.status(400).send({ message: "Invalid user ID" });
+				}
+
+				const count = await notificationCollection.countDocuments({
+					recipientId: new ObjectId(userId),
+					read: false,
+				});
+
+				res.status(200).send({ count });
+			} catch (error) {
+				console.error("Failed to get notification count:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
+
+		/*
 		=========================
 		Socket.io Real-Time Logic
 		=========================
@@ -1417,4 +1676,4 @@ server.listen(port, () => {
 	console.log(`Quadra listening on http://localhost:${port}`);
 });
 
-//test  comment 
+//test  comment
