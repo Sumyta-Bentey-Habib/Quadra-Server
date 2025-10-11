@@ -35,6 +35,7 @@ const io = new Server(server, {
 app.use(express.json());
 app.use(cors());
 
+
 const uri = `mongodb+srv://${process.env.DB_USERNAME}:${process.env.DB_PASSWORD}@cluster0.uteipwi.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
 const client = new MongoClient(uri, {
@@ -53,6 +54,9 @@ const onlineUsers = new Map();
 async function run() {
 	try {
 		await client.connect();
+
+	const usersCollection = client.db("QuadraDB").collection("users");
+    const postsCollection = client.db("QuadraDB").collection("posts");
 
 		//  Select your database & collection
 		const db = client.db("QuadraDB");
@@ -390,90 +394,7 @@ async function run() {
 				if (!post) {
 					return res.status(404).send({ message: "Post not found" });
 				}
-            /*
-    =================================Bookmarks API ROUTES====================================
-            */
-
-// POST → Add a bookmark
-app.post("/bookmarks", async (req, res) => {
-  try {
-    const { userId, postId } = req.body;
-
-    if (!ObjectId.isValid(userId) || !ObjectId.isValid(postId)) {
-      return res.status(400).send({ message: "Invalid userId or postId" });
-    }
-
-    const user = await userCollection.findOne({ _id: new ObjectId(userId) });
-    if (!user) return res.status(404).send({ message: "User not found" });
-
-    // Create bookmarks array if missing
-    if (!user.bookmarks) user.bookmarks = [];
-
-    // Prevent duplicate bookmarks
-    if (user.bookmarks.some((id) => id.equals(new ObjectId(postId)))) {
-      return res.status(400).send({ message: "Post already bookmarked" });
-    }
-
-    await userCollection.updateOne(
-      { _id: new ObjectId(userId) },
-      { $push: { bookmarks: new ObjectId(postId) } }
-    );
-
-    res.status(201).send({ message: "Post bookmarked successfully" });
-  } catch (error) {
-    console.error("Failed to add bookmark:", error);
-    res.status(500).send({ message: "Internal server error" });
-  }
-});
-
-// GET → Get all bookmarks for a user
-app.get("/bookmarks/:userId", async (req, res) => {
-  try {
-    const { userId } = req.params;
-    if (!ObjectId.isValid(userId)) {
-      return res.status(400).send({ message: "Invalid userId" });
-    }
-
-    const user = await userCollection.findOne({ _id: new ObjectId(userId) });
-    if (!user) return res.status(404).send({ message: "User not found" });
-
-    const bookmarkedPostIds = user.bookmarks || [];
-    if (bookmarkedPostIds.length === 0)
-      return res.status(200).send([]);
-
-    const bookmarkedPosts = await postCollection
-      .find({ _id: { $in: bookmarkedPostIds } })
-      .toArray();
-
-    res.status(200).send(bookmarkedPosts);
-  } catch (error) {
-    console.error("Failed to get bookmarks:", error);
-    res.status(500).send({ message: "Internal server error" });
-  }
-});
-
-// DELETE → Remove a bookmark
-app.delete("/bookmarks/:userId/:postId", async (req, res) => {
-  try {
-    const { userId, postId } = req.params;
-    if (!ObjectId.isValid(userId) || !ObjectId.isValid(postId)) {
-      return res.status(400).send({ message: "Invalid userId or postId" });
-    }
-
-    await userCollection.updateOne(
-      { _id: new ObjectId(userId) },
-      { $pull: { bookmarks: new ObjectId(postId) } }
-    );
-
-    res.status(200).send({ message: "Bookmark removed successfully" });
-  } catch (error) {
-    console.error("Failed to remove bookmark:", error);
-    res.status(500).send({ message: "Internal server error" });
-  }
-});
-
-
-
+  
 				// Return all comments of that post
 				res.status(200).send(post.comments || []);
 			} catch (error) {
@@ -481,6 +402,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 				res.status(500).send({ message: "Internal server error" });
 			}
 		});
+
 
 		//****************************************** */
 
@@ -1404,6 +1326,82 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 				console.log("A user disconnected:", socket.id);
 			});
 		});
+ // ---------------------------
+//  BOOKMARK ROUTES
+// ---------------------------
+
+// POST → Add a bookmark
+app.post("/bookmarks", async (req, res) => {
+  try {
+    const { userId, postId } = req.body;
+
+    if (!ObjectId.isValid(userId) || !ObjectId.isValid(postId)) {
+      return res.status(400).send({ message: "Invalid userId or postId" });
+    }
+
+    const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
+    if (!user) return res.status(404).send({ message: "User not found" });
+
+    // Initialize bookmarks array if not exists
+    if (!user.bookmarks) user.bookmarks = [];
+
+    // Prevent duplicate bookmarks
+    if (user.bookmarks.some((id) => id.equals(new ObjectId(postId)))) {
+      return res.status(400).send({ message: "Post already bookmarked" });
+    }
+
+    await usersCollection.updateOne(
+      { _id: new ObjectId(userId) },
+      { $push: { bookmarks: new ObjectId(postId) } }
+    );
+
+    res.status(201).send({ message: "Post bookmarked successfully" });
+  } catch (error) {
+    console.error("Failed to add bookmark:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
+});
+
+// GET → Get all bookmarks for a user
+app.get("/bookmarks/:userId", async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    const user = await usersCollection.findOne({ _id: new ObjectId(userId) });
+    if (!user) {
+      return res.status(404).send({ message: "User not found" });
+    }
+
+    const bookmarks = await postsCollection
+      .find({ _id: { $in: user.bookmarks || [] } })
+      .toArray();
+
+    res.send(bookmarks);
+  } catch (err) {
+    console.error("Error fetching bookmarks:", err);
+    res.status(500).send({ message: "Failed to fetch bookmarks" });
+  }
+});
+
+// DELETE → Remove a bookmark
+app.delete("/bookmarks/:userId/:postId", async (req, res) => {
+  try {
+    const { userId, postId } = req.params;
+    if (!ObjectId.isValid(userId) || !ObjectId.isValid(postId)) {
+      return res.status(400).send({ message: "Invalid userId or postId" });
+    }
+
+    await usersCollection.updateOne(
+      { _id: new ObjectId(userId) },
+      { $pull: { bookmarks: new ObjectId(postId) } }
+    );
+
+    res.status(200).send({ message: "Bookmark removed successfully" });
+  } catch (error) {
+    console.error("Failed to remove bookmark:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
+});
+
 	} catch (error) {
 		console.error(" MongoDB connection failed:", error);
 	} finally {
