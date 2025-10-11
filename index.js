@@ -303,6 +303,56 @@ async function run() {
 				avatar, 
 				reaction 
 			});
+
+			// Create notification for post owner (only when adding a new like)
+			if (post.userId.toString() !== userId) {
+				const notification = {
+					recipientId: post.userId,
+					senderId: new ObjectId(userId),
+					type: "like",
+					content: "liked your post",
+					postPreview: post.text ? (post.text.length > 100 ? post.text.substring(0, 100) + "..." : post.text) : "a post",
+					postId: new ObjectId(postId),
+					read: false,
+					createdAt: new Date(),
+					updatedAt: new Date(),
+				};
+
+				await notificationCollection.insertOne(notification);
+
+				// Fetch full notification with sender details
+				const fullNotification = await notificationCollection
+					.aggregate([
+						{ $match: { _id: notification._id } },
+						{
+							$lookup: {
+								from: "users",
+								localField: "senderId",
+								foreignField: "_id",
+								as: "sender",
+							},
+						},
+						{ $unwind: "$sender" },
+						{
+							$project: {
+								_id: 1,
+								type: 1,
+								content: 1,
+								postPreview: 1,
+								comment: 1,
+								read: 1,
+								createdAt: 1,
+								updatedAt: 1,
+								"sender.name": 1,
+								"sender.photoUrl": 1,
+							},
+						},
+					])
+					.toArray();
+
+				// Emit real-time notification to post owner
+				io.to(`user_${post.userId.toString()}`).emit("newNotification", fullNotification[0]);
+			}
 			}
 
 			// Save updated post
@@ -347,7 +397,7 @@ async function run() {
 			}
 		});
 
-		// ***************** Create a new post *****************
+		// ***************** Create a new comment *****************
 		app.post("/posts/:id/comments", async (req, res) => {
 			try {
 				const { id } = req.params;
@@ -356,6 +406,10 @@ async function run() {
 				if (!ObjectId.isValid(id)) return res.status(400).send({ message: "Invalid post ID" });
 
 				if (!text) return res.status(400).send({ message: "Comment text is required" });
+
+				// Get the post to find the owner
+				const post = await postCollection.findOne({ _id: new ObjectId(id) });
+				if (!post) return res.status(404).send({ message: "Post not found" });
 
 				const comment = {
 					_id: new ObjectId(), // unique ID for comment
@@ -372,6 +426,57 @@ async function run() {
 					.updateOne({ _id: new ObjectId(id) }, { $push: { comments: comment }, $set: { updatedAt: new Date() } });
 
 				if (result.modifiedCount === 0) return res.status(404).send({ message: "Post not found" });
+
+				// Create notification for post owner (only if commenter is not the post owner)
+				if (post.userId.toString() !== userId) {
+					const notification = {
+						recipientId: post.userId,
+						senderId: new ObjectId(userId),
+						type: "comment",
+						content: "commented on your post",
+						postPreview: post.text ? (post.text.length > 100 ? post.text.substring(0, 100) + "..." : post.text) : "a post",
+						comment: text.length > 50 ? text.substring(0, 50) + "..." : text,
+						postId: new ObjectId(id),
+						read: false,
+						createdAt: new Date(),
+						updatedAt: new Date(),
+					};
+
+					await notificationCollection.insertOne(notification);
+
+					// Fetch full notification with sender details
+					const fullNotification = await notificationCollection
+						.aggregate([
+							{ $match: { _id: notification._id } },
+							{
+								$lookup: {
+									from: "users",
+									localField: "senderId",
+									foreignField: "_id",
+									as: "sender",
+								},
+							},
+							{ $unwind: "$sender" },
+							{
+								$project: {
+									_id: 1,
+									type: 1,
+									content: 1,
+									postPreview: 1,
+									comment: 1,
+									read: 1,
+									createdAt: 1,
+									updatedAt: 1,
+									"sender.name": 1,
+									"sender.photoUrl": 1,
+								},
+							},
+						])
+						.toArray();
+
+					// Emit real-time notification to post owner
+					io.to(`user_${post.userId.toString()}`).emit("newNotification", fullNotification[0]);
+				}
 
 				res.status(201).send({ message: "Comment added successfully", comment });
 			} catch (error) {
@@ -498,6 +603,14 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 					return res.status(400).send({ message: "Invalid postId or commentId" });
 				}
 
+				// Get the post to find the original comment author
+				const post = await postCollection.findOne({ _id: new ObjectId(postId) });
+				if (!post) return res.status(404).send({ message: "Post not found" });
+
+				// Find the original comment to get the author's ID
+				const originalComment = post.comments.find(comment => comment._id.toString() === commentId);
+				if (!originalComment) return res.status(404).send({ message: "Comment not found" });
+
 				const reply = {
 					userId,
 					userName,
@@ -515,6 +628,57 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 
 				if (result.modifiedCount === 0) {
 					return res.status(404).send({ message: "Post or comment not found" });
+				}
+
+				// Create notification for original comment author (only if replier is not the comment author)
+				if (originalComment.userId.toString() !== userId) {
+					const notification = {
+						recipientId: originalComment.userId,
+						senderId: new ObjectId(userId),
+						type: "comment",
+						content: "replied to your comment",
+						postPreview: post.text ? (post.text.length > 100 ? post.text.substring(0, 100) + "..." : post.text) : "a post",
+						comment: text.length > 50 ? text.substring(0, 50) + "..." : text,
+						postId: new ObjectId(postId),
+						read: false,
+						createdAt: new Date(),
+						updatedAt: new Date(),
+					};
+
+					await notificationCollection.insertOne(notification);
+
+					// Fetch full notification with sender details
+					const fullNotification = await notificationCollection
+						.aggregate([
+							{ $match: { _id: notification._id } },
+							{
+								$lookup: {
+									from: "users",
+									localField: "senderId",
+									foreignField: "_id",
+									as: "sender",
+								},
+							},
+							{ $unwind: "$sender" },
+							{
+								$project: {
+									_id: 1,
+									type: 1,
+									content: 1,
+									postPreview: 1,
+									comment: 1,
+									read: 1,
+									createdAt: 1,
+									updatedAt: 1,
+									"sender.name": 1,
+									"sender.photoUrl": 1,
+								},
+							},
+						])
+						.toArray();
+
+					// Emit real-time notification to original comment author
+					io.to(`user_${originalComment.userId.toString()}`).emit("newNotification", fullNotification[0]);
 				}
 
 				res.status(201).send({ message: "Reply added successfully", reply });
