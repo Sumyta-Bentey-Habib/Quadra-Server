@@ -45,7 +45,7 @@ const client = new MongoClient(uri, {
 	},
 });
 
-let userCollection, conversationCollection, messageCollection, postCollection;
+	let userCollection, conversationCollection, messageCollection, postCollection, notificationCollection;
 
 // Track online users: { userId: { socketId, lastSeen } }
 const onlineUsers = new Map();
@@ -60,6 +60,7 @@ async function run() {
 		conversationCollection = db.collection("conversations");
 		messageCollection = db.collection("messages");
 		postCollection = db.collection("posts");
+		notificationCollection = db.collection("notifications");
 
 		// Indexes for faster queries
 		await messageCollection.createIndex({ conversationId: 1, createdAt: 1 });
@@ -302,6 +303,56 @@ async function run() {
 				avatar, 
 				reaction 
 			});
+
+			// Create notification for post owner (only when adding a new like)
+			if (post.userId.toString() !== userId) {
+				const notification = {
+					recipientId: post.userId,
+					senderId: new ObjectId(userId),
+					type: "like",
+					content: "liked your post",
+					postPreview: post.text ? (post.text.length > 100 ? post.text.substring(0, 100) + "..." : post.text) : "a post",
+					postId: new ObjectId(postId),
+					read: false,
+					createdAt: new Date(),
+					updatedAt: new Date(),
+				};
+
+				await notificationCollection.insertOne(notification);
+
+				// Fetch full notification with sender details
+				const fullNotification = await notificationCollection
+					.aggregate([
+						{ $match: { _id: notification._id } },
+						{
+							$lookup: {
+								from: "users",
+								localField: "senderId",
+								foreignField: "_id",
+								as: "sender",
+							},
+						},
+						{ $unwind: "$sender" },
+						{
+							$project: {
+								_id: 1,
+								type: 1,
+								content: 1,
+								postPreview: 1,
+								comment: 1,
+								read: 1,
+								createdAt: 1,
+								updatedAt: 1,
+								"sender.name": 1,
+								"sender.photoUrl": 1,
+							},
+						},
+					])
+					.toArray();
+
+				// Emit real-time notification to post owner
+				io.to(`user_${post.userId.toString()}`).emit("newNotification", fullNotification[0]);
+			}
 			}
 
 			// Save updated post
@@ -346,7 +397,7 @@ async function run() {
 			}
 		});
 
-		// ***************** Create a new post *****************
+		// ***************** Create a new comment *****************
 		app.post("/posts/:id/comments", async (req, res) => {
 			try {
 				const { id } = req.params;
@@ -355,6 +406,10 @@ async function run() {
 				if (!ObjectId.isValid(id)) return res.status(400).send({ message: "Invalid post ID" });
 
 				if (!text) return res.status(400).send({ message: "Comment text is required" });
+
+				// Get the post to find the owner
+				const post = await postCollection.findOne({ _id: new ObjectId(id) });
+				if (!post) return res.status(404).send({ message: "Post not found" });
 
 				const comment = {
 					_id: new ObjectId(), // unique ID for comment
@@ -371,6 +426,57 @@ async function run() {
 					.updateOne({ _id: new ObjectId(id) }, { $push: { comments: comment }, $set: { updatedAt: new Date() } });
 
 				if (result.modifiedCount === 0) return res.status(404).send({ message: "Post not found" });
+
+				// Create notification for post owner (only if commenter is not the post owner)
+				if (post.userId.toString() !== userId) {
+					const notification = {
+						recipientId: post.userId,
+						senderId: new ObjectId(userId),
+						type: "comment",
+						content: "commented on your post",
+						postPreview: post.text ? (post.text.length > 100 ? post.text.substring(0, 100) + "..." : post.text) : "a post",
+						comment: text.length > 50 ? text.substring(0, 50) + "..." : text,
+						postId: new ObjectId(id),
+						read: false,
+						createdAt: new Date(),
+						updatedAt: new Date(),
+					};
+
+					await notificationCollection.insertOne(notification);
+
+					// Fetch full notification with sender details
+					const fullNotification = await notificationCollection
+						.aggregate([
+							{ $match: { _id: notification._id } },
+							{
+								$lookup: {
+									from: "users",
+									localField: "senderId",
+									foreignField: "_id",
+									as: "sender",
+								},
+							},
+							{ $unwind: "$sender" },
+							{
+								$project: {
+									_id: 1,
+									type: 1,
+									content: 1,
+									postPreview: 1,
+									comment: 1,
+									read: 1,
+									createdAt: 1,
+									updatedAt: 1,
+									"sender.name": 1,
+									"sender.photoUrl": 1,
+								},
+							},
+						])
+						.toArray();
+
+					// Emit real-time notification to post owner
+					io.to(`user_${post.userId.toString()}`).emit("newNotification", fullNotification[0]);
+				}
 
 				res.status(201).send({ message: "Comment added successfully", comment });
 			} catch (error) {
@@ -497,6 +603,14 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 					return res.status(400).send({ message: "Invalid postId or commentId" });
 				}
 
+				// Get the post to find the original comment author
+				const post = await postCollection.findOne({ _id: new ObjectId(postId) });
+				if (!post) return res.status(404).send({ message: "Post not found" });
+
+				// Find the original comment to get the author's ID
+				const originalComment = post.comments.find(comment => comment._id.toString() === commentId);
+				if (!originalComment) return res.status(404).send({ message: "Comment not found" });
+
 				const reply = {
 					userId,
 					userName,
@@ -514,6 +628,57 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 
 				if (result.modifiedCount === 0) {
 					return res.status(404).send({ message: "Post or comment not found" });
+				}
+
+				// Create notification for original comment author (only if replier is not the comment author)
+				if (originalComment.userId.toString() !== userId) {
+					const notification = {
+						recipientId: originalComment.userId,
+						senderId: new ObjectId(userId),
+						type: "comment",
+						content: "replied to your comment",
+						postPreview: post.text ? (post.text.length > 100 ? post.text.substring(0, 100) + "..." : post.text) : "a post",
+						comment: text.length > 50 ? text.substring(0, 50) + "..." : text,
+						postId: new ObjectId(postId),
+						read: false,
+						createdAt: new Date(),
+						updatedAt: new Date(),
+					};
+
+					await notificationCollection.insertOne(notification);
+
+					// Fetch full notification with sender details
+					const fullNotification = await notificationCollection
+						.aggregate([
+							{ $match: { _id: notification._id } },
+							{
+								$lookup: {
+									from: "users",
+									localField: "senderId",
+									foreignField: "_id",
+									as: "sender",
+								},
+							},
+							{ $unwind: "$sender" },
+							{
+								$project: {
+									_id: 1,
+									type: 1,
+									content: 1,
+									postPreview: 1,
+									comment: 1,
+									read: 1,
+									createdAt: 1,
+									updatedAt: 1,
+									"sender.name": 1,
+									"sender.photoUrl": 1,
+								},
+							},
+						])
+						.toArray();
+
+					// Emit real-time notification to original comment author
+					io.to(`user_${originalComment.userId.toString()}`).emit("newNotification", fullNotification[0]);
 				}
 
 				res.status(201).send({ message: "Reply added successfully", reply });
@@ -699,7 +864,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 									_id: 1,
 									name: 1,
 									email: 1,
-									imageUrl: 1,
+									photoUrl: 1,
 								},
 							},
 						},
@@ -823,7 +988,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 									_id: 1,
 									name: 1,
 									email: 1,
-									imageUrl: 1,
+									photoUrl: 1,
 								},
 							},
 						},
@@ -935,7 +1100,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 								deleted: 1,
 								status: 1,
 								"sender.name": 1,
-								"sender.imageUrl": 1,
+								"sender.photoUrl": 1,
 							},
 						},
 						{ $sort: { createdAt: 1 } },
@@ -1005,7 +1170,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 				// Fetch sender details
 				const sender = await userCollection.findOne(
 					{ _id: new ObjectId(senderId) },
-					{ projection: { name: 1, imageUrl: 1 } },
+					{ projection: { name: 1, photoUrl: 1 } },
 				);
 
 				const fullMessage = {
@@ -1092,7 +1257,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 								conversationId: 1,
 								edited: 1,
 								"sender.name": 1,
-								"sender.imageUrl": 1,
+								"sender.photoUrl": 1,
 							},
 						},
 					])
@@ -1160,7 +1325,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 								edited: 1,
 								deleted: 1,
 								"sender.name": 1,
-								"sender.imageUrl": 1,
+								"sender.photoUrl": 1,
 							},
 						},
 					])
@@ -1199,7 +1364,7 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 				const result = await messageCollection.insertOne(newMessage);
 				const sender = await userCollection.findOne(
 					{ _id: new ObjectId(senderId) },
-					{ projection: { name: 1, imageUrl: 1 } },
+					{ projection: { name: 1, photoUrl: 1 } },
 				);
 
 				const fullMessage = { ...newMessage, _id: result.insertedId, sender };
@@ -1209,6 +1374,264 @@ app.delete("/bookmarks/:userId/:postId", async (req, res) => {
 				res.status(201).send(fullMessage);
 			} catch (error) {
 				console.error("Failed to forward message:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
+
+		/*
+		=======================
+		Notification API ROUTES
+		=======================
+		*/
+
+		// Get notifications for a user
+		app.get("/notifications/:userId", async (req, res) => {
+			try {
+				const { userId } = req.params;
+				const { type, read } = req.query;
+
+				if (!ObjectId.isValid(userId)) {
+					return res.status(400).send({ message: "Invalid user ID" });
+				}
+
+				// Build filter
+				let filter = { recipientId: new ObjectId(userId) };
+
+				if (type && type !== "all") {
+					filter.type = type;
+				}
+
+				if (read === "true") {
+					filter.read = true;
+				} else if (read === "false") {
+					filter.read = false;
+				}
+
+				const notifications = await notificationCollection
+					.aggregate([
+						{ $match: filter },
+						{
+							$lookup: {
+								from: "users",
+								localField: "senderId",
+								foreignField: "_id",
+								as: "sender",
+							},
+						},
+						{ $unwind: "$sender" },
+						{
+							$project: {
+								_id: 1,
+								type: 1,
+								content: 1,
+								postPreview: 1,
+								comment: 1,
+								read: 1,
+								createdAt: 1,
+								updatedAt: 1,
+								"sender.name": 1,
+								"sender.photoUrl": 1,
+							},
+						},
+						{ $sort: { createdAt: -1 } },
+					])
+					.toArray();
+
+				res.status(200).send(notifications);
+			} catch (error) {
+				console.error("Failed to fetch notifications:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
+
+		// Create a new notification
+		app.post("/notifications", async (req, res) => {
+			try {
+				const { recipientId, senderId, type, content, postPreview, comment, postId } = req.body;
+
+				if (!recipientId || !senderId || !type || !content) {
+					return res.status(400).send({ message: "Missing required fields" });
+				}
+
+				const newNotification = {
+					recipientId: new ObjectId(recipientId),
+					senderId: new ObjectId(senderId),
+					type,
+					content,
+					postPreview,
+					comment,
+					postId: postId ? new ObjectId(postId) : null,
+					read: false,
+					createdAt: new Date(),
+					updatedAt: new Date(),
+				};
+
+				const result = await notificationCollection.insertOne(newNotification);
+
+				// Fetch full notification with sender details
+				const fullNotification = await notificationCollection
+					.aggregate([
+						{ $match: { _id: result.insertedId } },
+						{
+							$lookup: {
+								from: "users",
+								localField: "senderId",
+								foreignField: "_id",
+								as: "sender",
+							},
+						},
+						{ $unwind: "$sender" },
+						{
+							$project: {
+								_id: 1,
+								type: 1,
+								content: 1,
+								postPreview: 1,
+								comment: 1,
+								read: 1,
+								createdAt: 1,
+								updatedAt: 1,
+								"sender.name": 1,
+								"sender.photoUrl": 1,
+							},
+						},
+					])
+					.toArray();
+
+				// Emit real-time notification to recipient
+				io.to(`user_${recipientId}`).emit("newNotification", fullNotification[0]);
+
+				res.status(201).send(fullNotification[0]);
+			} catch (error) {
+				console.error("Failed to create notification:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
+
+		// Mark notification as read
+		app.patch("/notifications/:notificationId/read", async (req, res) => {
+			try {
+				const { notificationId } = req.params;
+
+				if (!ObjectId.isValid(notificationId)) {
+					return res.status(400).send({ message: "Invalid notification ID" });
+				}
+
+				await notificationCollection.updateOne(
+					{ _id: new ObjectId(notificationId) },
+					{
+						$set: {
+							read: true,
+							updatedAt: new Date(),
+						},
+					},
+				);
+
+				const updatedNotification = await notificationCollection
+					.aggregate([
+						{ $match: { _id: new ObjectId(notificationId) } },
+						{
+							$lookup: {
+								from: "users",
+								localField: "senderId",
+								foreignField: "_id",
+								as: "sender",
+							},
+						},
+						{ $unwind: "$sender" },
+						{
+							$project: {
+								_id: 1,
+								type: 1,
+								content: 1,
+								postPreview: 1,
+								comment: 1,
+								read: 1,
+								createdAt: 1,
+								updatedAt: 1,
+								"sender.name": 1,
+								"sender.photoUrl": 1,
+							},
+						},
+					])
+					.toArray();
+
+				if (updatedNotification.length === 0) {
+					return res.status(404).send({ message: "Notification not found" });
+				}
+
+				res.status(200).send(updatedNotification[0]);
+			} catch (error) {
+				console.error("Failed to mark notification as read:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
+
+		// Mark all notifications as read for a user
+		app.patch("/notifications/user/:userId/read-all", async (req, res) => {
+			try {
+				const { userId } = req.params;
+
+				if (!ObjectId.isValid(userId)) {
+					return res.status(400).send({ message: "Invalid user ID" });
+				}
+
+				await notificationCollection.updateMany(
+					{ recipientId: new ObjectId(userId), read: false },
+					{
+						$set: {
+							read: true,
+							updatedAt: new Date(),
+						},
+					},
+				);
+
+				res.status(200).send({ message: "All notifications marked as read" });
+			} catch (error) {
+				console.error("Failed to mark all notifications as read:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
+
+		// Delete a notification
+		app.delete("/notifications/:notificationId", async (req, res) => {
+			try {
+				const { notificationId } = req.params;
+
+				if (!ObjectId.isValid(notificationId)) {
+					return res.status(400).send({ message: "Invalid notification ID" });
+				}
+
+				const result = await notificationCollection.deleteOne({ _id: new ObjectId(notificationId) });
+
+				if (result.deletedCount === 0) {
+					return res.status(404).send({ message: "Notification not found" });
+				}
+
+				res.status(200).send({ message: "Notification deleted successfully" });
+			} catch (error) {
+				console.error("Failed to delete notification:", error);
+				res.status(500).send({ message: "Internal server error" });
+			}
+		});
+
+		// Get unread notification count for a user
+		app.get("/notifications/:userId/count", async (req, res) => {
+			try {
+				const { userId } = req.params;
+
+				if (!ObjectId.isValid(userId)) {
+					return res.status(400).send({ message: "Invalid user ID" });
+				}
+
+				const count = await notificationCollection.countDocuments({
+					recipientId: new ObjectId(userId),
+					read: false,
+				});
+
+				res.status(200).send({ count });
+			} catch (error) {
+				console.error("Failed to get notification count:", error);
 				res.status(500).send({ message: "Internal server error" });
 			}
 		});
@@ -1417,4 +1840,4 @@ server.listen(port, () => {
 	console.log(`Quadra listening on http://localhost:${port}`);
 });
 
-//test  comment 
+//test  comment
